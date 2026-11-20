@@ -104,6 +104,7 @@ app.post("/upload-images", upload.array("images", 5), async (req, res) => {
 });
 
 
+
 // Add Service
 app.post("/services", async (req, res) => {
   try {
@@ -136,6 +137,24 @@ const result = await service.insertOne({
 app.get("/services", async (req, res) => {
   const result = await service.find({}).toArray();
   res.send(result);
+});
+
+
+// Get All Approved and Active Services
+app.get("/browse-services", async (req, res) => {
+  try {
+    const result = await service
+      .find({ status: "approved", isActive: true })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({
+      success: false,
+      message: "Failed to get services",
+    });
+  }
 });
 
 // Vendor Update Service Active Status
