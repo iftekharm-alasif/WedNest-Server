@@ -109,12 +109,13 @@ app.post("/services", async (req, res) => {
   try {
     console.log("Received Data:", req.body);
 
-    const result = await service.insertOne({
-      ...req.body,
-      price: Number(req.body.price),
-      status: "pending",
-      createdAt: new Date(),
-    });
+const result = await service.insertOne({
+  ...req.body,
+  price: Number(req.body.price),
+  status: "pending",
+  isActive: false,
+  createdAt: new Date(),
+});
 
     res.send({
       success: true,
@@ -135,6 +136,48 @@ app.post("/services", async (req, res) => {
 app.get("/services", async (req, res) => {
   const result = await service.find({}).toArray();
   res.send(result);
+});
+
+// Vendor Update Service Active Status
+app.patch("/services/:id/active", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body;
+
+    if (typeof isActive !== "boolean") {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid active status",
+      });
+    }
+
+    const result = await service.updateOne(
+      {
+        _id: new ObjectId(id),
+        status: "approved",
+      },
+      {
+        $set: { isActive },
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(400).send({
+        success: false,
+        message: "Only approved services can be activated",
+      });
+    }
+
+    res.send({
+      success: true,
+      message: "Service active status updated",
+    });
+  } catch (error) {
+    res.status(500).send({
+      success: false,
+      message: "Failed to update service",
+    });
+  }
 });
 
 // Delete Service
