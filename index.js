@@ -103,7 +103,82 @@ app.post("/upload-images", upload.array("images", 5), async (req, res) => {
   }
 });
 
+// Upload Image URL to ImgBB
+app.post("/upload-image-url", async (req, res) => {
+  try {
+    const { imageUrl } = req.body;
 
+    if (!imageUrl) {
+      return res.status(400).send({
+        success: false,
+        message: "Image URL is required",
+      });
+    }
+
+    const url = new URL(imageUrl);
+
+    if (url.protocol !== "https:" || url.hostname === "localhost") {
+      return res.status(400).send({
+        success: false,
+        message: "Please provide a valid public HTTPS image URL",
+      });
+    }
+
+    const imageResponse = await fetch(imageUrl);
+
+    if (!imageResponse.ok) {
+      throw new Error("Could not download image from this URL");
+    }
+
+    const contentType = imageResponse.headers.get("content-type") || "";
+
+    if (!contentType.startsWith("image/")) {
+      return res.status(400).send({
+        success: false,
+        message: "The provided URL is not an image",
+      });
+    }
+
+    const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+
+    if (imageBuffer.length > 5 * 1024 * 1024) {
+      return res.status(400).send({
+        success: false,
+        message: "Image size must be under 5 MB",
+      });
+    }
+
+    const formData = new URLSearchParams();
+    formData.append("image", imageBuffer.toString("base64"));
+
+    const uploadResponse = await fetch(
+      `https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    const result = await uploadResponse.json();
+
+    if (!uploadResponse.ok || !result.success) {
+      throw new Error("ImgBB upload failed");
+    }
+
+    res.send({
+      success: true,
+      image: result.data.url,
+      message: "Image uploaded to ImgBB successfully",
+    });
+  } catch (error) {
+    console.log("URL Image Upload Error:", error.message);
+
+    res.status(500).send({
+      success: false,
+      message: error.message || "Image upload failed",
+    });
+  }
+});
 
 // Add Service
 app.post("/services", async (req, res) => {
