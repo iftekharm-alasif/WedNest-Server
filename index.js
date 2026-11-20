@@ -37,6 +37,7 @@ async function connectToMongoDB() {
 const database = client.db("wednestdb")
 const users = database.collection("user")
 const service = database.collection("services")
+const bookings = database.collection("bookings");
 
 app.get("/", (req, res) => {
   res.send("WedNest is running");
@@ -180,6 +181,71 @@ app.post("/upload-image-url", async (req, res) => {
   }
 });
 
+
+// Create Booking
+app.post("/bookings", async (req, res) => {
+  try {
+    const {
+      serviceId,
+      vendorId,
+      customerId,
+      eventDate,
+      eventLocation,
+      message,
+    } = req.body;
+
+    if (
+      !serviceId ||
+      !vendorId ||
+      !customerId ||
+      !eventDate ||
+      !eventLocation
+    ) {
+      return res.status(400).send({
+        success: false,
+        message: "Please provide all required information",
+      });
+    }
+
+    const selectedService = await service.findOne({
+      _id: new ObjectId(serviceId),
+      status: "approved",
+      isActive: true,
+    });
+
+    if (!selectedService) {
+      return res.status(404).send({
+        success: false,
+        message: "Service is not available",
+      });
+    }
+
+    const result = await bookings.insertOne({
+      serviceId,
+      vendorId,
+      customerId,
+      eventDate,
+      eventLocation,
+      message,
+      status: "pending",
+      createdAt: new Date(),
+    });
+
+    res.send({
+      success: true,
+      message: "Booking request sent successfully",
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.log("Booking Error:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to create booking",
+    });
+  }
+});
+
 // Add Service
 app.post("/services", async (req, res) => {
   try {
@@ -214,12 +280,43 @@ app.get("/services", async (req, res) => {
   res.send(result);
 });
 
+// Get Single Service
+app.get("/services/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid service ID",
+      });
+    }
+
+    const result = await service.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!result) {
+      return res.status(404).send({
+        success: false,
+        message: "Service not found",
+      });
+    }
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({
+      success: false,
+      message: "Failed to load service",
+    });
+  }
+});
 
 // Get All Approved and Active Services
 app.get("/browse-services", async (req, res) => {
   try {
     const result = await service
-      .find({ status: "approved", isActive: true })
+      .find({ status: "approved"})
       .sort({ createdAt: -1 })
       .toArray();
 
