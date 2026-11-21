@@ -19,10 +19,9 @@ const upload = multer({
 app.use(cors());
 app.use(express.json());
 
-
 // MongoDB Connection
 const client = new MongoClient(
-  `mongodb://${process.env.MONGO_DB_USER}:${process.env.MONGO_DB_PASSWORD}@ac-qmflq3w-shard-00-00.bmqtlfl.mongodb.net:27017,ac-qmflq3w-shard-00-01.bmqtlfl.mongodb.net:27017,ac-qmfl3w-shard-00-02.bmqtlfl.mongodb.net:27017/?ssl=true&replicaSet=atlas-7oshzy-shard-0&authSource=admin`
+  `mongodb://${process.env.MONGO_DB_USER}:${process.env.MONGO_DB_PASSWORD}@ac-qmflq3w-shard-00-00.bmqtlfl.mongodb.net:27017,ac-qmflq3w-shard-00-01.bmqtlfl.mongodb.net:27017,ac-qmfl3w-shard-00-02.bmqtlfl.mongodb.net:27017/?ssl=true&replicaSet=atlas-7oshzy-shard-0&authSource=admin`,
 );
 
 async function connectToMongoDB() {
@@ -34,15 +33,14 @@ async function connectToMongoDB() {
   }
 }
 
-const database = client.db("wednestdb")
-const users = database.collection("user")
-const service = database.collection("services")
+const database = client.db("wednestdb");
+const users = database.collection("user");
+const service = database.collection("services");
 const bookings = database.collection("bookings");
 
 app.get("/", (req, res) => {
   res.send("WedNest is running");
 });
-
 
 // Upload Images to ImgBB
 
@@ -72,7 +70,7 @@ app.post("/upload-images", upload.array("images", 5), async (req, res) => {
           {
             method: "POST",
             body: formData,
-          }
+          },
         );
 
         const result = await response.json();
@@ -80,13 +78,11 @@ app.post("/upload-images", upload.array("images", 5), async (req, res) => {
         console.log("ImgBB Response:", result);
 
         if (!response.ok || !result.success) {
-          throw new Error(
-            result.error?.message || "Image upload failed"
-          );
+          throw new Error(result.error?.message || "Image upload failed");
         }
 
         return result.data.url;
-      })
+      }),
     );
 
     res.send({
@@ -157,7 +153,7 @@ app.post("/upload-image-url", async (req, res) => {
       {
         method: "POST",
         body: formData,
-      }
+      },
     );
 
     const result = await uploadResponse.json();
@@ -181,11 +177,13 @@ app.post("/upload-image-url", async (req, res) => {
   }
 });
 
-
 // Create Booking
 app.post("/bookings", async (req, res) => {
   try {
     const {
+      customerName,
+      customerEmail,
+      customerPhone,
       serviceId,
       vendorId,
       customerId,
@@ -195,6 +193,9 @@ app.post("/bookings", async (req, res) => {
     } = req.body;
 
     if (
+      !customerName ||
+      !customerEmail ||
+      !customerPhone ||
       !serviceId ||
       !vendorId ||
       !customerId ||
@@ -221,6 +222,9 @@ app.post("/bookings", async (req, res) => {
     }
 
     const result = await bookings.insertOne({
+      customerName,
+      customerEmail,
+      customerPhone,
       serviceId,
       vendorId,
       customerId,
@@ -246,18 +250,225 @@ app.post("/bookings", async (req, res) => {
   }
 });
 
+// Get Vendor Bookings
+app.get("/vendor-bookings", async (req, res) => {
+  try {
+    const { vendorId } = req.query;
+
+    if (!vendorId) {
+      return res.status(400).send({
+        success: false,
+        message: "Vendor ID is required",
+      });
+    }
+
+    const result = await bookings
+      .find({ vendorId })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    const bookingDetails = await Promise.all(
+      result.map(async (item) => {
+        const serviceDetails = await service.findOne({
+          _id: new ObjectId(item.serviceId),
+        });
+
+        return {
+          ...item,
+          serviceName: serviceDetails?.serviceName || "Service Not Found",
+          price: serviceDetails?.price || 0,
+        };
+      }),
+    );
+
+    res.send(bookingDetails);
+  } catch (error) {
+    console.log(error);
+    res.status(500).send({
+      success: false,
+      message: "Failed to load bookings",
+    });
+  }
+});
+
+// Update Booking Status
+app.patch("/bookings/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid booking ID",
+      });
+    }
+
+    if (!["accepted", "rejected"].includes(status)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid booking status",
+      });
+    }
+
+    const result = await bookings.updateOne(
+      { _id: new ObjectId(id), status: "pending" },
+      { $set: { status } },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        success: false,
+        message: "Pending booking not found",
+      });
+    }
+
+    res.send({
+      success: true,
+      message: `Booking ${status} successfully`,
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).send({
+      success: false,
+      message: "Failed to update booking",
+    });
+  }
+});
+
+// Get Customer Bookings
+app.get("/customer-bookings", async (req, res) => {
+  try {
+    const { customerId } = req.query;
+
+    if (!customerId) {
+      return res.status(400).send({
+        success: false,
+        message: "Customer ID is required",
+      });
+    }
+
+    const result = await bookings
+      .find({ customerId })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    const bookingDetails = await Promise.all(
+      result.map(async (item) => {
+        const serviceDetails = ObjectId.isValid(item.serviceId)
+          ? await service.findOne({
+              _id: new ObjectId(item.serviceId),
+            })
+          : null;
+
+        return {
+          ...item,
+          serviceName: serviceDetails?.serviceName || "Service Not Available",
+          price: serviceDetails?.price || 0,
+          serviceImage: serviceDetails?.images?.[0] || "",
+          vendorName: serviceDetails?.vendorName || "WedNest Vendor",
+        };
+      }),
+    );
+
+    res.send(bookingDetails);
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to load customer bookings",
+    });
+  }
+});
+
+// Cancel Customer Booking
+app.patch("/bookings/:id/cancel", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { customerId } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid booking ID",
+      });
+    }
+
+    const result = await bookings.updateOne(
+      {
+        _id: new ObjectId(id),
+        customerId,
+        status: "pending",
+      },
+      {
+        $set: { status: "cancelled" },
+      },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        success: false,
+        message: "Pending booking not found",
+      });
+    }
+
+    res.send({
+      success: true,
+      message: "Booking cancelled successfully",
+    });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to cancel booking",
+    });
+  }
+});
+
+// Get Customer Booking for a Service
+app.get("/customer-booking", async (req, res) => {
+  try {
+    const { serviceId, customerId } = req.query;
+
+    if (!serviceId || !customerId) {
+      return res.status(400).send({
+        success: false,
+        message: "Service ID and Customer ID are required",
+      });
+    }
+
+    const result = await bookings
+      .find({ serviceId, customerId })
+      .sort({ createdAt: -1 })
+      .limit(1)
+      .next();
+
+    res.send(result || null);
+  } catch (error) {
+    console.log(error);
+    res.status(500).send({
+      success: false,
+      message: "Failed to load customer booking",
+    });
+  }
+});
+
+
+
 // Add Service
 app.post("/services", async (req, res) => {
   try {
     console.log("Received Data:", req.body);
 
-const result = await service.insertOne({
-  ...req.body,
-  price: Number(req.body.price),
-  status: "pending",
-  isActive: false,
-  createdAt: new Date(),
-});
+    const result = await service.insertOne({
+      ...req.body,
+      price: Number(req.body.price),
+      status: "pending",
+      isActive: false,
+      createdAt: new Date(),
+    });
 
     res.send({
       success: true,
@@ -316,7 +527,7 @@ app.get("/services/:id", async (req, res) => {
 app.get("/browse-services", async (req, res) => {
   try {
     const result = await service
-      .find({ status: "approved"})
+      .find({ status: "approved" })
       .sort({ createdAt: -1 })
       .toArray();
 
@@ -349,7 +560,7 @@ app.patch("/services/:id/active", async (req, res) => {
       },
       {
         $set: { isActive },
-      }
+      },
     );
 
     if (result.matchedCount === 0) {
@@ -386,11 +597,11 @@ app.delete("/services/:id", async (req, res) => {
 });
 
 //users
-app.get('/users',async(req,res) => {
-    const cursor = users.find({})
-    const result = await cursor.toArray();
-    res.send(result);
-})
+app.get("/users", async (req, res) => {
+  const cursor = users.find({});
+  const result = await cursor.toArray();
+  res.send(result);
+});
 
 async function startServer() {
   await connectToMongoDB();
