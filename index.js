@@ -500,23 +500,23 @@ app.post("/services", async (req, res) => {
       });
     }
 
-    const currentPlan = vendor.subscriptionPlan || "free";
 
-    if (currentPlan !== "premium") {
-      const activeCount = await service.countDocuments({
-        vendorId: vendorId,
-        status: "approved",
-        isActive: true,
-      });
+const currentPlan = vendor.subscriptionPlan || "free";
 
-      if (activeCount >= 3) {
-        return res.status(403).send({
-          success: false,
-          message:
-            "Free Plan allows maximum 3 active services. Upgrade to Premium for unlimited services.",
-        });
-      }
-    }
+if (currentPlan !== "premium") {
+  const totalServices = await service.countDocuments({
+    vendorId: vendorId,
+  });
+
+  if (totalServices >= 3) {
+    return res.status(403).send({
+      success: false,
+      message:
+        "Free Plan allows maximum 3 services. Upgrade to Premium for unlimited services.",
+    });
+  }
+}
+
 
     const newService = {
       serviceName,
@@ -590,7 +590,96 @@ app.get("/services/:id", async (req, res) => {
   }
 });
 
-// Get All Approved and Active Services
+
+// Update Service
+app.put("/services/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      serviceName,
+      category,
+      description,
+      price,
+      location,
+      images,
+      vendorId,
+    } = req.body;
+
+    if (!ObjectId.isValid(id) || !ObjectId.isValid(vendorId)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid service or vendor ID",
+      });
+    }
+
+    const existingService = await service.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!existingService) {
+      return res.status(404).send({
+        success: false,
+        message: "Service not found",
+      });
+    }
+
+    if (existingService.vendorId !== vendorId) {
+      return res.status(403).send({
+        success: false,
+        message: "You cannot edit this service",
+      });
+    }
+
+    if (
+      !serviceName ||
+      !category ||
+      !description ||
+      !location ||
+      !Array.isArray(images) ||
+      images.length === 0 ||
+      images.length > 5 ||
+      Number(price) <= 0
+    ) {
+      return res.status(400).send({
+        success: false,
+        message: "Please provide valid service information and 1-5 images",
+      });
+    }
+
+    const result = await service.updateOne(
+      {
+        _id: new ObjectId(id),
+        vendorId: vendorId,
+      },
+      {
+        $set: {
+          serviceName,
+          category,
+          description,
+          price: Number(price),
+          location,
+          images,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    res.send({
+      success: true,
+      message: "Service updated successfully",
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (error) {
+    console.log("Update Service Error:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to update service",
+    });
+  }
+});
+
+// Get All Approved Services (Active and Inactive)
 app.get("/browse-services", async (req, res) => {
   try {
     const result = await service
