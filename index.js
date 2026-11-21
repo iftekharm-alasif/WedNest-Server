@@ -458,32 +458,99 @@ app.get("/customer-booking", async (req, res) => {
 
 
 // Add Service
+
+
 app.post("/services", async (req, res) => {
   try {
-    console.log("Received Data:", req.body);
+    const {
+      serviceName,
+      category,
+      description,
+      price,
+      location,
+      images,
+      vendorId,
+      vendorName,
+      vendorEmail,
+    } = req.body;
 
-    const result = await service.insertOne({
-      ...req.body,
-      price: Number(req.body.price),
+    if (!vendorId) {
+      return res.status(400).send({
+        success: false,
+        message: "Vendor information is required",
+      });
+    }
+
+    if (!ObjectId.isValid(vendorId)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid vendor ID",
+      });
+    }
+
+    const vendor = await users.findOne({
+      _id: new ObjectId(vendorId),
+      role: "vendor",
+    });
+
+    if (!vendor) {
+      return res.status(404).send({
+        success: false,
+        message: "Vendor not found",
+      });
+    }
+
+    const currentPlan = vendor.subscriptionPlan || "free";
+
+    if (currentPlan !== "premium") {
+      const activeCount = await service.countDocuments({
+        vendorId: vendorId,
+        status: "approved",
+        isActive: true,
+      });
+
+      if (activeCount >= 3) {
+        return res.status(403).send({
+          success: false,
+          message:
+            "Free Plan allows maximum 3 active services. Upgrade to Premium for unlimited services.",
+        });
+      }
+    }
+
+    const newService = {
+      serviceName,
+      category,
+      description,
+      price: Number(price),
+      location,
+      images,
+      vendorId,
+      vendorName,
+      vendorEmail,
       status: "pending",
       isActive: false,
       createdAt: new Date(),
-    });
+    };
+
+    const result = await service.insertOne(newService);
 
     res.send({
       success: true,
-      message: "Service added successfully",
+      message: "Service submitted successfully",
       insertedId: result.insertedId,
     });
   } catch (error) {
-    console.log("Service Error:", error);
+    console.log("Create Service Error:", error);
 
     res.status(500).send({
       success: false,
-      message: "Failed to add service",
+      message: "Failed to create service",
     });
   }
 });
+
+
 
 // Get All Services
 app.get("/services", async (req, res) => {
