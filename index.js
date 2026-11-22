@@ -1002,6 +1002,63 @@ app.get("/admin/services", verifyToken, verifyRole("admin"), async (req, res) =>
 });
 
 
+ // Update Admin Service Status
+app.patch(
+  "/admin/services/:id/status",
+  verifyToken,
+  verifyRole("admin"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid service ID",
+        });
+      }
+
+      if (!["approved", "rejected"].includes(status)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid service status",
+        });
+      }
+
+      const result = await service.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            status,
+            updatedAt: new Date(),
+          },
+        }
+      );
+
+      if (!result.matchedCount) {
+        return res.status(404).send({
+          success: false,
+          message: "Service not found",
+        });
+      }
+
+      res.send({
+        success: true,
+        message: `Service ${status} successfully`,
+      });
+    } catch (error) {
+      console.error("Update Admin Service Status Error:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to update service status",
+      });
+    }
+  }
+);
+
+
 //users
 app.get("/users", verifyToken, verifyRole("admin"), async (req, res) => {
   const cursor = users.find({});
