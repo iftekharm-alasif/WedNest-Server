@@ -962,6 +962,46 @@ app.delete("/services/:id", verifyToken, verifyRole("vendor"), async (req, res) 
 });
 
 
+// Get All Services for Admin
+app.get("/admin/services", verifyToken, verifyRole("admin"), async (req, res) => {
+  try {
+    const data = await service
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    const result = data.map((service) => ({
+      _id: service._id.toString(),
+      serviceName: service.serviceName || "Untitled Service",
+      category: service.category || "Uncategorized",
+      price: Number(service.price || 0),
+      location: service.location || "Not specified",
+      description: service.description || "",
+      images: Array.isArray(service.images) ? service.images : [],
+      status: service.status || "pending",
+      isActive: service.isActive === true,
+      vendorName: service.vendorName || "Unknown Vendor",
+      vendorEmail: service.vendorEmail || "",
+      createdAt: service.createdAt
+        ? new Date(service.createdAt).toISOString()
+        : null,
+    }));
+
+    res.send({
+      success: true,
+      services: result,
+    });
+  } catch (error) {
+    console.error("Get Admin Services Error:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to load services",
+    });
+  }
+});
+
+
 //users
 app.get("/users", verifyToken, verifyRole("admin"), async (req, res) => {
   const cursor = users.find({});
