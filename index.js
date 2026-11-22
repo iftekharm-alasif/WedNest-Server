@@ -956,6 +956,41 @@ app.delete("/services/:id", verifyToken, verifyRole("vendor"), async (req, res) 
   }
 });
 
+// Delete Admin Service
+app.delete("/admin/services/:id", verifyToken, verifyRole("admin"), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid service ID",
+      });
+    }
+
+    const result = await service.deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Service not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Service deleted successfully",
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete service",
+    });
+  }
+});
 
 // Get All Services for Admin
 app.get("/admin/services", verifyToken, verifyRole("admin"), async (req, res) => {
@@ -1053,15 +1088,6 @@ app.patch(
   }
 );
 
-
- // Delete Admin Service
-
- 
-
-
-
-
- 
 
 
 app.get("/users", verifyToken, verifyRole("admin"), async (req, res) => {
