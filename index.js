@@ -564,33 +564,49 @@ app.patch(
 );
 
 
-// Get Customer Booking for a Service
-app.get("/customer-booking", async (req, res) => {
-  try {
-    const { serviceId, customerId } = req.query;
 
-    if (!serviceId || !customerId) {
-      return res.status(400).send({
+// Get Customer Booking for a Service
+app.get(
+  "/customer-booking",
+  verifyToken,
+  verifyRole("customer"),
+  async (req, res) => {
+    try {
+      const { serviceId } = req.query;
+      const customerId = req.user.id;
+
+      if (!serviceId) {
+        return res.status(400).send({
+          success: false,
+          message: "Service ID is required",
+        });
+      }
+
+      if (!ObjectId.isValid(serviceId)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid Service ID",
+        });
+      }
+
+      const result = await bookings
+        .find({ serviceId, customerId })
+        .sort({ createdAt: -1 })
+        .limit(1)
+        .next();
+
+      res.json(result || null);
+    } catch (error) {
+      console.log("Get Customer Booking Error:", error);
+
+      res.status(500).send({
         success: false,
-        message: "Service ID and Customer ID are required",
+        message: "Failed to load customer booking",
       });
     }
-
-    const result = await bookings
-      .find({ serviceId, customerId })
-      .sort({ createdAt: -1 })
-      .limit(1)
-      .next();
-
-    res.send(result || null);
-  } catch (error) {
-    console.log(error);
-    res.status(500).send({
-      success: false,
-      message: "Failed to load customer booking",
-    });
   }
-});
+);
+
 
 
 
