@@ -778,11 +778,20 @@ app.get("/browse-services", async (req, res) => {
   }
 });
 
+
 // Vendor Update Service Active Status
-app.patch("/services/:id/active", async (req, res) => {
+app.patch("/services/:id/active", verifyToken, verifyRole("vendor"), async (req, res) => {
   try {
     const { id } = req.params;
     const { isActive } = req.body;
+    const vendorId = req.user.id;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid service ID",
+      });
+    }
 
     if (typeof isActive !== "boolean") {
       return res.status(400).send({
@@ -791,34 +800,56 @@ app.patch("/services/:id/active", async (req, res) => {
       });
     }
 
-    const result = await service.updateOne(
-      {
-        _id: new ObjectId(id),
-        status: "approved",
-      },
-      {
-        $set: { isActive },
-      },
-    );
+    const existingService = await service.findOne({
+      _id: new ObjectId(id),
+    });
 
-    if (result.matchedCount === 0) {
+    if (!existingService) {
+      return res.status(404).send({
+        success: false,
+        message: "Service not found",
+      });
+    }
+
+    if (existingService.vendorId !== vendorId) {
+      return res.status(403).send({
+        success: false,
+        message: "You cannot update this service",
+      });
+    }
+
+    if (existingService.status !== "approved") {
       return res.status(400).send({
         success: false,
         message: "Only approved services can be activated",
       });
     }
 
+    await service.updateOne(
+      {
+        _id: new ObjectId(id),
+        vendorId: vendorId,
+        status: "approved",
+      },
+      {
+        $set: { isActive },
+      }
+    );
+
     res.send({
       success: true,
       message: "Service active status updated",
     });
   } catch (error) {
+    console.log("Update Active Status Error:", error);
+
     res.status(500).send({
       success: false,
       message: "Failed to update service",
     });
   }
 });
+
 
 
 // Delete Service
