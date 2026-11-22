@@ -291,6 +291,7 @@ app.get("/vendor-bookings", async (req, res) => {
   }
 });
 
+
 // Update Booking Status
 app.patch("/bookings/:id/status", async (req, res) => {
   try {
@@ -304,22 +305,38 @@ app.patch("/bookings/:id/status", async (req, res) => {
       });
     }
 
-    if (!["accepted", "rejected"].includes(status)) {
+    if (!["accepted", "rejected", "completed"].includes(status)) {
       return res.status(400).send({
         success: false,
         message: "Invalid booking status",
       });
     }
 
+    let allowedStatus;
+
+    if (status === "completed") {
+      allowedStatus = "accepted";
+    } else {
+      allowedStatus = "pending";
+    }
+
     const result = await bookings.updateOne(
-      { _id: new ObjectId(id), status: "pending" },
-      { $set: { status } },
+      {
+        _id: new ObjectId(id),
+        status: allowedStatus,
+      },
+      {
+        $set: {
+          status,
+          updatedAt: new Date(),
+        },
+      }
     );
 
     if (result.matchedCount === 0) {
       return res.status(404).send({
         success: false,
-        message: "Pending booking not found",
+        message: `Booking cannot be updated to ${status}`,
       });
     }
 
@@ -329,12 +346,14 @@ app.patch("/bookings/:id/status", async (req, res) => {
     });
   } catch (error) {
     console.log(error);
+
     res.status(500).send({
       success: false,
       message: "Failed to update booking",
     });
   }
 });
+
 
 // Get Customer Bookings
 app.get("/customer-bookings", async (req, res) => {
