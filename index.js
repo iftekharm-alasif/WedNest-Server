@@ -509,50 +509,60 @@ app.get("/customer-bookings", verifyToken, verifyRole("customer"), async (req, r
 });
 
 
+
 // Cancel Customer Booking
-app.patch("/bookings/:id/cancel", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { customerId } = req.body;
+app.patch(
+  "/bookings/:id/cancel",
+  verifyToken,
+  verifyRole("customer"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const customerId = req.user.id;
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).send({
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid booking ID",
+        });
+      }
+
+      const result = await bookings.updateOne(
+        {
+          _id: new ObjectId(id),
+          customerId: customerId,
+          status: "pending",
+        },
+        {
+          $set: {
+            status: "cancelled",
+            updatedAt: new Date(),
+          },
+        }
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).send({
+          success: false,
+          message: "Pending booking not found",
+        });
+      }
+
+      res.send({
+        success: true,
+        message: "Booking cancelled successfully",
+      });
+    } catch (error) {
+      console.log("Cancel Booking Error:", error);
+
+      res.status(500).send({
         success: false,
-        message: "Invalid booking ID",
+        message: "Failed to cancel booking",
       });
     }
-
-    const result = await bookings.updateOne(
-      {
-        _id: new ObjectId(id),
-        customerId,
-        status: "pending",
-      },
-      {
-        $set: { status: "cancelled" },
-      },
-    );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).send({
-        success: false,
-        message: "Pending booking not found",
-      });
-    }
-
-    res.send({
-      success: true,
-      message: "Booking cancelled successfully",
-    });
-  } catch (error) {
-    console.log(error);
-
-    res.status(500).send({
-      success: false,
-      message: "Failed to cancel booking",
-    });
   }
-});
+);
+
 
 // Get Customer Booking for a Service
 app.get("/customer-booking", async (req, res) => {
