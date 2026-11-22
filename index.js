@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { MongoClient, ObjectId } from "mongodb";
 import multer from "multer";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
 dotenv.config();
 
@@ -19,6 +20,80 @@ const upload = multer({
 app.use(cors());
 app.use(express.json());
 
+//middleware
+const JWKS = createRemoteJWKSet(
+  new URL(`${process.env.AUTH_URL}/api/auth/jwks`)
+);
+
+async function verifyToken(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).send({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    const { payload } = await jwtVerify(token, JWKS, {
+      issuer: process.env.AUTH_URL,
+    });
+
+    const user = await users.findOne({
+      _id: ObjectId.isValid(payload.sub)
+        ? new ObjectId(payload.sub)
+        : payload.sub,
+    });
+
+    if (!user || user.isBanned === true) {
+      return res.status(403).send({
+        success: false,
+        message: "User not allowed",
+      });
+    }
+
+    req.user = {
+      id: user._id.toString(),
+      email: user.email,
+      role: user.role,
+    };
+
+    next();
+  } catch (error) {
+    console.log("JWT Error:", error.message);
+
+    return res.status(401).send({
+      success: false,
+      message: "Invalid or expired token",
+    });
+  }
+}
+
+//verifyToken
+app.get("/api/protected", verifyToken, (req, res) => {
+  res.send({
+    success: true,
+    message: "JWT verified successfully",
+    user: req.user,
+  });
+});
+
+//VerifyRoleJwt
+function verifyRole(...allowedRoles) {
+  return (req, res, next) => {
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
+      return res.status(403).send({
+        success: false,
+        message: "Access denied",
+      });
+    }
+
+    next();
+  };
+}
 // MongoDB Connection
 const client = new MongoClient(
   `mongodb://${process.env.MONGO_DB_USER}:${process.env.MONGO_DB_PASSWORD}@ac-qmflq3w-shard-00-00.bmqtlfl.mongodb.net:27017,ac-qmflq3w-shard-00-01.bmqtlfl.mongodb.net:27017,ac-qmfl3w-shard-00-02.bmqtlfl.mongodb.net:27017/?ssl=true&replicaSet=atlas-7oshzy-shard-0&authSource=admin`,
@@ -476,10 +551,9 @@ app.get("/customer-booking", async (req, res) => {
 
 
 
+
 // Add Service
-
-
-app.post("/services", async (req, res) => {
+app.post("/services", verifyToken, verifyRole("vendor"), async (req, res) => {
   try {
     const {
       serviceName,
@@ -488,24 +562,9 @@ app.post("/services", async (req, res) => {
       price,
       location,
       images,
-      vendorId,
-      vendorName,
-      vendorEmail,
     } = req.body;
 
-    if (!vendorId) {
-      return res.status(400).send({
-        success: false,
-        message: "Vendor information is required",
-      });
-    }
-
-    if (!ObjectId.isValid(vendorId)) {
-      return res.status(400).send({
-        success: false,
-        message: "Invalid vendor ID",
-      });
-    }
+    const vendorId = req.user.id;
 
     const vendor = await users.findOne({
       _id: new ObjectId(vendorId),
@@ -519,23 +578,21 @@ app.post("/services", async (req, res) => {
       });
     }
 
+    const currentPlan = vendor.subscriptionPlan || "free";
 
-const currentPlan = vendor.subscriptionPlan || "free";
+    if (currentPlan !== "premium") {
+      const totalServices = await service.countDocuments({
+        vendorId: vendorId,
+      });
 
-if (currentPlan !== "premium") {
-  const totalServices = await service.countDocuments({
-    vendorId: vendorId,
-  });
-
-  if (totalServices >= 3) {
-    return res.status(403).send({
-      success: false,
-      message:
-        "Free Plan allows maximum 3 services. Upgrade to Premium for unlimited services.",
-    });
-  }
-}
-
+      if (totalServices >= 3) {
+        return res.status(403).send({
+          success: false,
+          message:
+            "Free Plan allows maximum 3 services. Upgrade to Premium for unlimited services.",
+        });
+      }
+    }
 
     const newService = {
       serviceName,
@@ -544,9 +601,9 @@ if (currentPlan !== "premium") {
       price: Number(price),
       location,
       images,
-      vendorId,
-      vendorName,
-      vendorEmail,
+      vendorId: vendorId,
+      vendorName: vendor.name,
+      vendorEmail: vendor.email,
       status: "pending",
       isActive: false,
       createdAt: new Date(),
@@ -568,6 +625,7 @@ if (currentPlan !== "premium") {
     });
   }
 });
+
 
 
 
@@ -610,10 +668,12 @@ app.get("/services/:id", async (req, res) => {
 });
 
 
+
 // Update Service
-app.put("/services/:id", async (req, res) => {
+app.put("/services/:id", verifyToken, verifyRole("vendor"), async (req, res) => {
   try {
     const { id } = req.params;
+
     const {
       serviceName,
       category,
@@ -621,13 +681,14 @@ app.put("/services/:id", async (req, res) => {
       price,
       location,
       images,
-      vendorId,
     } = req.body;
 
-    if (!ObjectId.isValid(id) || !ObjectId.isValid(vendorId)) {
+    const vendorId = req.user.id;
+
+    if (!ObjectId.isValid(id)) {
       return res.status(400).send({
         success: false,
-        message: "Invalid service or vendor ID",
+        message: "Invalid service ID",
       });
     }
 
@@ -657,6 +718,7 @@ app.put("/services/:id", async (req, res) => {
       !Array.isArray(images) ||
       images.length === 0 ||
       images.length > 5 ||
+      !Number.isFinite(Number(price)) ||
       Number(price) <= 0
     ) {
       return res.status(400).send({
@@ -697,6 +759,7 @@ app.put("/services/:id", async (req, res) => {
     });
   }
 });
+
 
 // Get All Approved Services (Active and Inactive)
 app.get("/browse-services", async (req, res) => {
@@ -757,22 +820,60 @@ app.patch("/services/:id/active", async (req, res) => {
   }
 });
 
+
 // Delete Service
-app.delete("/services/:id", async (req, res) => {
-  const { id } = req.params;
+app.delete("/services/:id", verifyToken, verifyRole("vendor"), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const vendorId = req.user.id;
 
-  const result = await service.deleteOne({
-    _id: new ObjectId(id),
-  });
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid service ID",
+      });
+    }
 
-  res.send({
-    success: result.deletedCount > 0,
-    message: "Service deleted successfully",
-  });
+    const existingService = await service.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!existingService) {
+      return res.status(404).send({
+        success: false,
+        message: "Service not found",
+      });
+    }
+
+    if (existingService.vendorId !== vendorId) {
+      return res.status(403).send({
+        success: false,
+        message: "You cannot delete this service",
+      });
+    }
+
+    const result = await service.deleteOne({
+      _id: new ObjectId(id),
+      vendorId: vendorId,
+    });
+
+    res.send({
+      success: result.deletedCount > 0,
+      message: "Service deleted successfully",
+    });
+  } catch (error) {
+    console.log("Delete Service Error:", error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to delete service",
+    });
+  }
 });
 
+
 //users
-app.get("/users", async (req, res) => {
+app.get("/users", verifyToken, verifyRole("admin"), async (req, res) => {
   const cursor = users.find({});
   const result = await cursor.toArray();
   res.send(result);
