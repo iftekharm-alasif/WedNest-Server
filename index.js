@@ -1059,6 +1059,50 @@ app.patch(
 );
 
 
+ // Delete Admin Service
+app.delete(
+  "/admin/services/:id",
+  verifyToken,
+  verifyRole("admin"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid service ID",
+        });
+      }
+
+      const result = await service.deleteOne({
+        _id: new ObjectId(id),
+      });
+
+      if (!result.deletedCount) {
+        return res.status(404).send({
+          success: false,
+          message: "Service not found",
+        });
+      }
+
+      res.send({
+        success: true,
+        message: "Service deleted successfully",
+      });
+    } catch (error) {
+      console.error("Delete Admin Service Error:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to delete service",
+      });
+    }
+  }
+);
+
+
+
 //users
 app.get("/users", verifyToken, verifyRole("admin"), async (req, res) => {
   const cursor = users.find({});
