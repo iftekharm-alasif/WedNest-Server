@@ -252,34 +252,47 @@ app.post("/upload-image-url", async (req, res) => {
   }
 });
 
+
 // Create Booking
-app.post("/bookings", async (req, res) => {
+app.post("/bookings", verifyToken, verifyRole("customer"), async (req, res) => {
   try {
     const {
-      customerName,
-      customerEmail,
       customerPhone,
       serviceId,
-      vendorId,
-      customerId,
       eventDate,
       eventLocation,
       message,
     } = req.body;
 
+    const customerId = req.user.id;
+
     if (
-      !customerName ||
-      !customerEmail ||
       !customerPhone ||
       !serviceId ||
-      !vendorId ||
-      !customerId ||
       !eventDate ||
       !eventLocation
     ) {
       return res.status(400).send({
         success: false,
         message: "Please provide all required information",
+      });
+    }
+
+    if (!ObjectId.isValid(serviceId)) {
+      return res.status(400).send({
+        success: false,
+        message: "Invalid service ID",
+      });
+    }
+
+    const customer = await users.findOne({
+      _id: new ObjectId(customerId),
+    });
+
+    if (!customer) {
+      return res.status(404).send({
+        success: false,
+        message: "Customer not found",
       });
     }
 
@@ -297,15 +310,15 @@ app.post("/bookings", async (req, res) => {
     }
 
     const result = await bookings.insertOne({
-      customerName,
-      customerEmail,
+      customerName: customer.name,
+      customerEmail: customer.email,
       customerPhone,
       serviceId,
-      vendorId,
+      vendorId: selectedService.vendorId,
       customerId,
       eventDate,
       eventLocation,
-      message,
+      message: message || "",
       status: "pending",
       createdAt: new Date(),
     });
@@ -324,6 +337,7 @@ app.post("/bookings", async (req, res) => {
     });
   }
 });
+
 
 
 // Get Vendor Bookings
