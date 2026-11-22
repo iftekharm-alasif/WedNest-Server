@@ -20,9 +20,15 @@ const upload = multer({
 app.use(cors());
 app.use(express.json());
 
-//middleware
+
+const AUTH_URL = process.env.AUTH_URL?.replace(/\/+$/, "");
+
+if (!AUTH_URL) {
+  throw new Error("AUTH_URL is missing from environment variables");
+}
+
 const JWKS = createRemoteJWKSet(
-  new URL(`${process.env.AUTH_URL}/api/auth/jwks`)
+  new URL(`${AUTH_URL}/api/auth/jwks`)
 );
 
 async function verifyToken(req, res, next) {
@@ -39,7 +45,7 @@ async function verifyToken(req, res, next) {
     const token = authHeader.split(" ")[1];
 
     const { payload } = await jwtVerify(token, JWKS, {
-      issuer: process.env.AUTH_URL,
+      issuer: AUTH_URL,
     });
 
     const user = await users.findOne({
@@ -71,6 +77,7 @@ async function verifyToken(req, res, next) {
     });
   }
 }
+
 
 //verifyToken
 app.get("/api/protected", verifyToken, (req, res) => {
@@ -461,17 +468,11 @@ app.patch("/bookings/:id/status", verifyToken, verifyRole("vendor"), async (req,
 });
 
 
-// Get Customer Bookings
-app.get("/customer-bookings", async (req, res) => {
-  try {
-    const { customerId } = req.query;
 
-    if (!customerId) {
-      return res.status(400).send({
-        success: false,
-        message: "Customer ID is required",
-      });
-    }
+// Get Customer Bookings
+app.get("/customer-bookings", verifyToken, verifyRole("customer"), async (req, res) => {
+  try {
+    const customerId = req.user.id;
 
     const result = await bookings
       .find({ customerId })
@@ -493,12 +494,12 @@ app.get("/customer-bookings", async (req, res) => {
           serviceImage: serviceDetails?.images?.[0] || "",
           vendorName: serviceDetails?.vendorName || "WedNest Vendor",
         };
-      }),
+      })
     );
 
     res.send(bookingDetails);
   } catch (error) {
-    console.log(error);
+    console.log("Get Customer Bookings Error:", error);
 
     res.status(500).send({
       success: false,
@@ -506,6 +507,7 @@ app.get("/customer-bookings", async (req, res) => {
     });
   }
 });
+
 
 // Cancel Customer Booking
 app.patch("/bookings/:id/cancel", async (req, res) => {
