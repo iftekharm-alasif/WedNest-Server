@@ -102,16 +102,15 @@ function verifyRole(...allowedRoles) {
   };
 }
 // MongoDB Connection
-const client = new MongoClient(
-  `mongodb://${process.env.MONGO_DB_USER}:${process.env.MONGO_DB_PASSWORD}@ac-qmflq3w-shard-00-00.bmqtlfl.mongodb.net:27017,ac-qmflq3w-shard-00-01.bmqtlfl.mongodb.net:27017,ac-qmfl3w-shard-00-02.bmqtlfl.mongodb.net:27017/?ssl=true&replicaSet=atlas-7oshzy-shard-0&authSource=admin`,
-);
+const client = new MongoClient(process.env.MONGODB_URI);
 
 async function connectToMongoDB() {
   try {
     await client.connect();
     console.log("You successfully connected to MongoDB!");
   } catch (error) {
-    console.log("MongoDB connection failed:", error);
+    console.error("MongoDB connection failed:", error);
+    throw error;
   }
 }
 
@@ -606,10 +605,6 @@ app.get(
     }
   }
 );
-
-
-
-
 
 // Add Service
 app.post("/services", verifyToken, verifyRole("vendor"), async (req, res) => {
