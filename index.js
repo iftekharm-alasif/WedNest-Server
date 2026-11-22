@@ -363,11 +363,13 @@ app.get("/vendor-bookings", verifyToken, verifyRole("vendor"), async (req, res) 
 
 
 
+
 // Update Booking Status
-app.patch("/bookings/:id/status", async (req, res) => {
+app.patch("/bookings/:id/status", verifyToken, verifyRole("vendor"), async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
+    const vendorId = req.user.id;
 
     if (!ObjectId.isValid(id)) {
       return res.status(400).send({
@@ -383,6 +385,24 @@ app.patch("/bookings/:id/status", async (req, res) => {
       });
     }
 
+    const existingBooking = await bookings.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!existingBooking) {
+      return res.status(404).send({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    if (existingBooking.vendorId !== vendorId) {
+      return res.status(403).send({
+        success: false,
+        message: "You cannot update this booking",
+      });
+    }
+
     let allowedStatus;
 
     if (status === "completed") {
@@ -394,6 +414,7 @@ app.patch("/bookings/:id/status", async (req, res) => {
     const result = await bookings.updateOne(
       {
         _id: new ObjectId(id),
+        vendorId: vendorId,
         status: allowedStatus,
       },
       {
@@ -405,7 +426,7 @@ app.patch("/bookings/:id/status", async (req, res) => {
     );
 
     if (result.matchedCount === 0) {
-      return res.status(404).send({
+      return res.status(400).send({
         success: false,
         message: `Booking cannot be updated to ${status}`,
       });
@@ -416,7 +437,7 @@ app.patch("/bookings/:id/status", async (req, res) => {
       message: `Booking ${status} successfully`,
     });
   } catch (error) {
-    console.log(error);
+    console.log("Update Booking Status Error:", error);
 
     res.status(500).send({
       success: false,
