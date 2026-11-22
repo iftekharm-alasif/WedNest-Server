@@ -325,17 +325,11 @@ app.post("/bookings", async (req, res) => {
   }
 });
 
-// Get Vendor Bookings
-app.get("/vendor-bookings", async (req, res) => {
-  try {
-    const { vendorId } = req.query;
 
-    if (!vendorId) {
-      return res.status(400).send({
-        success: false,
-        message: "Vendor ID is required",
-      });
-    }
+// Get Vendor Bookings
+app.get("/vendor-bookings", verifyToken, verifyRole("vendor"), async (req, res) => {
+  try {
+    const vendorId = req.user.id;
 
     const result = await bookings
       .find({ vendorId })
@@ -353,18 +347,20 @@ app.get("/vendor-bookings", async (req, res) => {
           serviceName: serviceDetails?.serviceName || "Service Not Found",
           price: serviceDetails?.price || 0,
         };
-      }),
+      })
     );
 
     res.send(bookingDetails);
   } catch (error) {
-    console.log(error);
+    console.log("Get Vendor Bookings Error:", error);
+
     res.status(500).send({
       success: false,
       message: "Failed to load bookings",
     });
   }
 });
+
 
 
 // Update Booking Status
