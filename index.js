@@ -20,16 +20,13 @@ const upload = multer({
 app.use(cors());
 app.use(express.json());
 
-
 const AUTH_URL = process.env.AUTH_URL?.replace(/\/+$/, "");
 
 if (!AUTH_URL) {
   throw new Error("AUTH_URL is missing from environment variables");
 }
 
-const JWKS = createRemoteJWKSet(
-  new URL(`${AUTH_URL}/api/auth/jwks`)
-);
+const JWKS = createRemoteJWKSet(new URL(`${AUTH_URL}/api/auth/jwks`));
 
 async function verifyToken(req, res, next) {
   try {
@@ -77,7 +74,6 @@ async function verifyToken(req, res, next) {
     });
   }
 }
-
 
 //verifyToken
 app.get("/api/protected", verifyToken, (req, res) => {
@@ -258,26 +254,15 @@ app.post("/upload-image-url", async (req, res) => {
   }
 });
 
-
 // Create Booking
 app.post("/bookings", verifyToken, verifyRole("customer"), async (req, res) => {
   try {
-    const {
-      customerPhone,
-      serviceId,
-      eventDate,
-      eventLocation,
-      message,
-    } = req.body;
+    const { customerPhone, serviceId, eventDate, eventLocation, message } =
+      req.body;
 
     const customerId = req.user.id;
 
-    if (
-      !customerPhone ||
-      !serviceId ||
-      !eventDate ||
-      !eventLocation
-    ) {
+    if (!customerPhone || !serviceId || !eventDate || !eventLocation) {
       return res.status(400).send({
         success: false,
         message: "Please provide all required information",
@@ -315,6 +300,19 @@ app.post("/bookings", verifyToken, verifyRole("customer"), async (req, res) => {
       });
     }
 
+    const existingBooking = await bookings.findOne({
+      customerId,
+      serviceId,
+      status: { $in: ["pending", "accepted"] },
+    });
+
+    if (existingBooking) {
+      return res.status(409).send({
+        success: false,
+        message: "You have already sent a booking request for this service.",
+      });
+    }
+
     const result = await bookings.insertOne({
       customerName: customer.name,
       customerEmail: customer.email,
@@ -344,170 +342,176 @@ app.post("/bookings", verifyToken, verifyRole("customer"), async (req, res) => {
   }
 });
 
-
-
 // Get Vendor Bookings
-app.get("/vendor-bookings", verifyToken, verifyRole("vendor"), async (req, res) => {
-  try {
-    const vendorId = req.user.id;
+app.get(
+  "/vendor-bookings",
+  verifyToken,
+  verifyRole("vendor"),
+  async (req, res) => {
+    try {
+      const vendorId = req.user.id;
 
-    const result = await bookings
-      .find({ vendorId })
-      .sort({ createdAt: -1 })
-      .toArray();
+      const result = await bookings
+        .find({ vendorId })
+        .sort({ createdAt: -1 })
+        .toArray();
 
-    const bookingDetails = await Promise.all(
-      result.map(async (item) => {
-        const serviceDetails = await service.findOne({
-          _id: new ObjectId(item.serviceId),
-        });
+      const bookingDetails = await Promise.all(
+        result.map(async (item) => {
+          const serviceDetails = await service.findOne({
+            _id: new ObjectId(item.serviceId),
+          });
 
-        return {
-          ...item,
-          serviceName: serviceDetails?.serviceName || "Service Not Found",
-          price: serviceDetails?.price || 0,
-        };
-      })
-    );
+          return {
+            ...item,
+            serviceName: serviceDetails?.serviceName || "Service Not Found",
+            price: serviceDetails?.price || 0,
+          };
+        }),
+      );
 
-    res.send(bookingDetails);
-  } catch (error) {
-    console.log("Get Vendor Bookings Error:", error);
+      res.send(bookingDetails);
+    } catch (error) {
+      console.log("Get Vendor Bookings Error:", error);
 
-    res.status(500).send({
-      success: false,
-      message: "Failed to load bookings",
-    });
-  }
-});
-
-
-
+      res.status(500).send({
+        success: false,
+        message: "Failed to load bookings",
+      });
+    }
+  },
+);
 
 // Update Booking Status
-app.patch("/bookings/:id/status", verifyToken, verifyRole("vendor"), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
-    const vendorId = req.user.id;
+app.patch(
+  "/bookings/:id/status",
+  verifyToken,
+  verifyRole("vendor"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+      const vendorId = req.user.id;
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).send({
-        success: false,
-        message: "Invalid booking ID",
-      });
-    }
-
-    if (!["accepted", "rejected", "completed"].includes(status)) {
-      return res.status(400).send({
-        success: false,
-        message: "Invalid booking status",
-      });
-    }
-
-    const existingBooking = await bookings.findOne({
-      _id: new ObjectId(id),
-    });
-
-    if (!existingBooking) {
-      return res.status(404).send({
-        success: false,
-        message: "Booking not found",
-      });
-    }
-
-    if (existingBooking.vendorId !== vendorId) {
-      return res.status(403).send({
-        success: false,
-        message: "You cannot update this booking",
-      });
-    }
-
-    let allowedStatus;
-
-    if (status === "completed") {
-      allowedStatus = "accepted";
-    } else {
-      allowedStatus = "pending";
-    }
-
-    const result = await bookings.updateOne(
-      {
-        _id: new ObjectId(id),
-        vendorId: vendorId,
-        status: allowedStatus,
-      },
-      {
-        $set: {
-          status,
-          updatedAt: new Date(),
-        },
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid booking ID",
+        });
       }
-    );
 
-    if (result.matchedCount === 0) {
-      return res.status(400).send({
+      if (!["accepted", "rejected", "completed"].includes(status)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid booking status",
+        });
+      }
+
+      const existingBooking = await bookings.findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (!existingBooking) {
+        return res.status(404).send({
+          success: false,
+          message: "Booking not found",
+        });
+      }
+
+      if (existingBooking.vendorId !== vendorId) {
+        return res.status(403).send({
+          success: false,
+          message: "You cannot update this booking",
+        });
+      }
+
+      let allowedStatus;
+
+      if (status === "completed") {
+        allowedStatus = "accepted";
+      } else {
+        allowedStatus = "pending";
+      }
+
+      const result = await bookings.updateOne(
+        {
+          _id: new ObjectId(id),
+          vendorId: vendorId,
+          status: allowedStatus,
+        },
+        {
+          $set: {
+            status,
+            updatedAt: new Date(),
+          },
+        },
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(400).send({
+          success: false,
+          message: `Booking cannot be updated to ${status}`,
+        });
+      }
+
+      res.send({
+        success: true,
+        message: `Booking ${status} successfully`,
+      });
+    } catch (error) {
+      console.log("Update Booking Status Error:", error);
+
+      res.status(500).send({
         success: false,
-        message: `Booking cannot be updated to ${status}`,
+        message: "Failed to update booking",
       });
     }
-
-    res.send({
-      success: true,
-      message: `Booking ${status} successfully`,
-    });
-  } catch (error) {
-    console.log("Update Booking Status Error:", error);
-
-    res.status(500).send({
-      success: false,
-      message: "Failed to update booking",
-    });
-  }
-});
-
-
+  },
+);
 
 // Get Customer Bookings
-app.get("/customer-bookings", verifyToken, verifyRole("customer"), async (req, res) => {
-  try {
-    const customerId = req.user.id;
+app.get(
+  "/customer-bookings",
+  verifyToken,
+  verifyRole("customer"),
+  async (req, res) => {
+    try {
+      const customerId = req.user.id;
 
-    const result = await bookings
-      .find({ customerId })
-      .sort({ createdAt: -1 })
-      .toArray();
+      const result = await bookings
+        .find({ customerId })
+        .sort({ createdAt: -1 })
+        .toArray();
 
-    const bookingDetails = await Promise.all(
-      result.map(async (item) => {
-        const serviceDetails = ObjectId.isValid(item.serviceId)
-          ? await service.findOne({
-              _id: new ObjectId(item.serviceId),
-            })
-          : null;
+      const bookingDetails = await Promise.all(
+        result.map(async (item) => {
+          const serviceDetails = ObjectId.isValid(item.serviceId)
+            ? await service.findOne({
+                _id: new ObjectId(item.serviceId),
+              })
+            : null;
 
-        return {
-          ...item,
-          serviceName: serviceDetails?.serviceName || "Service Not Available",
-          price: serviceDetails?.price || 0,
-          serviceImage: serviceDetails?.images?.[0] || "",
-          vendorName: serviceDetails?.vendorName || "WedNest Vendor",
-        };
-      })
-    );
+          return {
+            ...item,
+            serviceName: serviceDetails?.serviceName || "Service Not Available",
+            price: serviceDetails?.price || 0,
+            serviceImage: serviceDetails?.images?.[0] || "",
+            vendorName: serviceDetails?.vendorName || "WedNest Vendor",
+          };
+        }),
+      );
 
-    res.send(bookingDetails);
-  } catch (error) {
-    console.log("Get Customer Bookings Error:", error);
+      res.send(bookingDetails);
+    } catch (error) {
+      console.log("Get Customer Bookings Error:", error);
 
-    res.status(500).send({
-      success: false,
-      message: "Failed to load customer bookings",
-    });
-  }
-});
-
-
+      res.status(500).send({
+        success: false,
+        message: "Failed to load customer bookings",
+      });
+    }
+  },
+);
 
 // Cancel Customer Booking
 app.patch(
@@ -537,7 +541,7 @@ app.patch(
             status: "cancelled",
             updatedAt: new Date(),
           },
-        }
+        },
       );
 
       if (result.matchedCount === 0) {
@@ -559,12 +563,11 @@ app.patch(
         message: "Failed to cancel booking",
       });
     }
-  }
+  },
 );
 
 
-
-// Get Customer Booking for a Service
+// Get Active Customer Booking for a Service
 app.get(
   "/customer-booking",
   verifyToken,
@@ -589,7 +592,11 @@ app.get(
       }
 
       const result = await bookings
-        .find({ serviceId, customerId })
+        .find({
+          serviceId,
+          customerId,
+          status: { $in: ["pending", "accepted"] },
+        })
         .sort({ createdAt: -1 })
         .limit(1)
         .next();
@@ -603,20 +610,15 @@ app.get(
         message: "Failed to load customer booking",
       });
     }
-  }
+  },
 );
+
 
 // Add Service
 app.post("/services", verifyToken, verifyRole("vendor"), async (req, res) => {
   try {
-    const {
-      serviceName,
-      category,
-      description,
-      price,
-      location,
-      images,
-    } = req.body;
+    const { serviceName, category, description, price, location, images } =
+      req.body;
 
     const vendorId = req.user.id;
 
@@ -680,9 +682,6 @@ app.post("/services", verifyToken, verifyRole("vendor"), async (req, res) => {
   }
 });
 
-
-
-
 // Get All Services
 app.get("/services", async (req, res) => {
   const result = await service.find({}).toArray();
@@ -721,99 +720,95 @@ app.get("/services/:id", async (req, res) => {
   }
 });
 
-
-
 // Update Service
-app.put("/services/:id", verifyToken, verifyRole("vendor"), async (req, res) => {
-  try {
-    const { id } = req.params;
+app.put(
+  "/services/:id",
+  verifyToken,
+  verifyRole("vendor"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
 
-    const {
-      serviceName,
-      category,
-      description,
-      price,
-      location,
-      images,
-    } = req.body;
+      const { serviceName, category, description, price, location, images } =
+        req.body;
 
-    const vendorId = req.user.id;
+      const vendorId = req.user.id;
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).send({
-        success: false,
-        message: "Invalid service ID",
-      });
-    }
-
-    const existingService = await service.findOne({
-      _id: new ObjectId(id),
-    });
-
-    if (!existingService) {
-      return res.status(404).send({
-        success: false,
-        message: "Service not found",
-      });
-    }
-
-    if (existingService.vendorId !== vendorId) {
-      return res.status(403).send({
-        success: false,
-        message: "You cannot edit this service",
-      });
-    }
-
-    if (
-      !serviceName ||
-      !category ||
-      !description ||
-      !location ||
-      !Array.isArray(images) ||
-      images.length === 0 ||
-      images.length > 5 ||
-      !Number.isFinite(Number(price)) ||
-      Number(price) <= 0
-    ) {
-      return res.status(400).send({
-        success: false,
-        message: "Please provide valid service information and 1-5 images",
-      });
-    }
-
-    const result = await service.updateOne(
-      {
-        _id: new ObjectId(id),
-        vendorId: vendorId,
-      },
-      {
-        $set: {
-          serviceName,
-          category,
-          description,
-          price: Number(price),
-          location,
-          images,
-          updatedAt: new Date(),
-        },
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid service ID",
+        });
       }
-    );
 
-    res.send({
-      success: true,
-      message: "Service updated successfully",
-      modifiedCount: result.modifiedCount,
-    });
-  } catch (error) {
-    console.log("Update Service Error:", error);
+      const existingService = await service.findOne({
+        _id: new ObjectId(id),
+      });
 
-    res.status(500).send({
-      success: false,
-      message: "Failed to update service",
-    });
-  }
-});
+      if (!existingService) {
+        return res.status(404).send({
+          success: false,
+          message: "Service not found",
+        });
+      }
 
+      if (existingService.vendorId !== vendorId) {
+        return res.status(403).send({
+          success: false,
+          message: "You cannot edit this service",
+        });
+      }
+
+      if (
+        !serviceName ||
+        !category ||
+        !description ||
+        !location ||
+        !Array.isArray(images) ||
+        images.length === 0 ||
+        images.length > 5 ||
+        !Number.isFinite(Number(price)) ||
+        Number(price) <= 0
+      ) {
+        return res.status(400).send({
+          success: false,
+          message: "Please provide valid service information and 1-5 images",
+        });
+      }
+
+      const result = await service.updateOne(
+        {
+          _id: new ObjectId(id),
+          vendorId: vendorId,
+        },
+        {
+          $set: {
+            serviceName,
+            category,
+            description,
+            price: Number(price),
+            location,
+            images,
+            updatedAt: new Date(),
+          },
+        },
+      );
+
+      res.send({
+        success: true,
+        message: "Service updated successfully",
+        modifiedCount: result.modifiedCount,
+      });
+    } catch (error) {
+      console.log("Update Service Error:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to update service",
+      });
+    }
+  },
+);
 
 // Get All Approved Services (Active and Inactive)
 app.get("/browse-services", async (req, res) => {
@@ -832,207 +827,220 @@ app.get("/browse-services", async (req, res) => {
   }
 });
 
-
 // Vendor Update Service Active Status
-app.patch("/services/:id/active", verifyToken, verifyRole("vendor"), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { isActive } = req.body;
-    const vendorId = req.user.id;
+app.patch(
+  "/services/:id/active",
+  verifyToken,
+  verifyRole("vendor"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { isActive } = req.body;
+      const vendorId = req.user.id;
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).send({
-        success: false,
-        message: "Invalid service ID",
-      });
-    }
-
-    if (typeof isActive !== "boolean") {
-      return res.status(400).send({
-        success: false,
-        message: "Invalid active status",
-      });
-    }
-
-    const existingService = await service.findOne({
-      _id: new ObjectId(id),
-    });
-
-    if (!existingService) {
-      return res.status(404).send({
-        success: false,
-        message: "Service not found",
-      });
-    }
-
-    if (existingService.vendorId !== vendorId) {
-      return res.status(403).send({
-        success: false,
-        message: "You cannot update this service",
-      });
-    }
-
-    if (existingService.status !== "approved") {
-      return res.status(400).send({
-        success: false,
-        message: "Only approved services can be activated",
-      });
-    }
-
-    await service.updateOne(
-      {
-        _id: new ObjectId(id),
-        vendorId: vendorId,
-        status: "approved",
-      },
-      {
-        $set: { isActive },
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid service ID",
+        });
       }
-    );
 
-    res.send({
-      success: true,
-      message: "Service active status updated",
-    });
-  } catch (error) {
-    console.log("Update Active Status Error:", error);
+      if (typeof isActive !== "boolean") {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid active status",
+        });
+      }
 
-    res.status(500).send({
-      success: false,
-      message: "Failed to update service",
-    });
-  }
-});
+      const existingService = await service.findOne({
+        _id: new ObjectId(id),
+      });
 
+      if (!existingService) {
+        return res.status(404).send({
+          success: false,
+          message: "Service not found",
+        });
+      }
 
+      if (existingService.vendorId !== vendorId) {
+        return res.status(403).send({
+          success: false,
+          message: "You cannot update this service",
+        });
+      }
+
+      if (existingService.status !== "approved") {
+        return res.status(400).send({
+          success: false,
+          message: "Only approved services can be activated",
+        });
+      }
+
+      await service.updateOne(
+        {
+          _id: new ObjectId(id),
+          vendorId: vendorId,
+          status: "approved",
+        },
+        {
+          $set: { isActive },
+        },
+      );
+
+      res.send({
+        success: true,
+        message: "Service active status updated",
+      });
+    } catch (error) {
+      console.log("Update Active Status Error:", error);
+
+      res.status(500).send({
+        success: false,
+        message: "Failed to update service",
+      });
+    }
+  },
+);
 
 // Delete Service
-app.delete("/services/:id", verifyToken, verifyRole("vendor"), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const vendorId = req.user.id;
+app.delete(
+  "/services/:id",
+  verifyToken,
+  verifyRole("vendor"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const vendorId = req.user.id;
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).send({
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid service ID",
+        });
+      }
+
+      const existingService = await service.findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (!existingService) {
+        return res.status(404).send({
+          success: false,
+          message: "Service not found",
+        });
+      }
+
+      if (existingService.vendorId !== vendorId) {
+        return res.status(403).send({
+          success: false,
+          message: "You cannot delete this service",
+        });
+      }
+
+      const result = await service.deleteOne({
+        _id: new ObjectId(id),
+        vendorId: vendorId,
+      });
+
+      res.send({
+        success: result.deletedCount > 0,
+        message: "Service deleted successfully",
+      });
+    } catch (error) {
+      console.log("Delete Service Error:", error);
+
+      res.status(500).send({
         success: false,
-        message: "Invalid service ID",
+        message: "Failed to delete service",
       });
     }
-
-    const existingService = await service.findOne({
-      _id: new ObjectId(id),
-    });
-
-    if (!existingService) {
-      return res.status(404).send({
-        success: false,
-        message: "Service not found",
-      });
-    }
-
-    if (existingService.vendorId !== vendorId) {
-      return res.status(403).send({
-        success: false,
-        message: "You cannot delete this service",
-      });
-    }
-
-    const result = await service.deleteOne({
-      _id: new ObjectId(id),
-      vendorId: vendorId,
-    });
-
-    res.send({
-      success: result.deletedCount > 0,
-      message: "Service deleted successfully",
-    });
-  } catch (error) {
-    console.log("Delete Service Error:", error);
-
-    res.status(500).send({
-      success: false,
-      message: "Failed to delete service",
-    });
-  }
-});
+  },
+);
 
 // Delete Admin Service
-app.delete("/admin/services/:id", verifyToken, verifyRole("admin"), async (req, res) => {
-  try {
-    const { id } = req.params;
+app.delete(
+  "/admin/services/:id",
+  verifyToken,
+  verifyRole("admin"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid service ID",
+        });
+      }
+
+      const result = await service.deleteOne({
+        _id: new ObjectId(id),
+      });
+
+      if (result.deletedCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Service not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Service deleted successfully",
+      });
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({
         success: false,
-        message: "Invalid service ID",
+        message: "Failed to delete service",
       });
     }
-
-    const result = await service.deleteOne({
-      _id: new ObjectId(id),
-    });
-
-    if (result.deletedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Service not found",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: "Service deleted successfully",
-    });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete service",
-    });
-  }
-});
+  },
+);
 
 // Get All Services for Admin
-app.get("/admin/services", verifyToken, verifyRole("admin"), async (req, res) => {
-  try {
-    const data = await service
-      .find({})
-      .sort({ createdAt: -1 })
-      .toArray();
+app.get(
+  "/admin/services",
+  verifyToken,
+  verifyRole("admin"),
+  async (req, res) => {
+    try {
+      const data = await service.find({}).sort({ createdAt: -1 }).toArray();
 
-    const result = data.map((service) => ({
-      _id: service._id.toString(),
-      serviceName: service.serviceName || "Untitled Service",
-      category: service.category || "Uncategorized",
-      price: Number(service.price || 0),
-      location: service.location || "Not specified",
-      description: service.description || "",
-      images: Array.isArray(service.images) ? service.images : [],
-      status: service.status || "pending",
-      isActive: service.isActive === true,
-      vendorName: service.vendorName || "Unknown Vendor",
-      vendorEmail: service.vendorEmail || "",
-      createdAt: service.createdAt
-        ? new Date(service.createdAt).toISOString()
-        : null,
-    }));
+      const result = data.map((service) => ({
+        _id: service._id.toString(),
+        serviceName: service.serviceName || "Untitled Service",
+        category: service.category || "Uncategorized",
+        price: Number(service.price || 0),
+        location: service.location || "Not specified",
+        description: service.description || "",
+        images: Array.isArray(service.images) ? service.images : [],
+        status: service.status || "pending",
+        isActive: service.isActive === true,
+        vendorName: service.vendorName || "Unknown Vendor",
+        vendorEmail: service.vendorEmail || "",
+        createdAt: service.createdAt
+          ? new Date(service.createdAt).toISOString()
+          : null,
+      }));
 
-    res.send({
-      success: true,
-      services: result,
-    });
-  } catch (error) {
-    console.error("Get Admin Services Error:", error);
+      res.send({
+        success: true,
+        services: result,
+      });
+    } catch (error) {
+      console.error("Get Admin Services Error:", error);
 
-    res.status(500).send({
-      success: false,
-      message: "Failed to load services",
-    });
-  }
-});
+      res.status(500).send({
+        success: false,
+        message: "Failed to load services",
+      });
+    }
+  },
+);
 
-
- // Update Admin Service Status
+// Update Admin Service Status
 app.patch(
   "/admin/services/:id/status",
   verifyToken,
@@ -1063,7 +1071,7 @@ app.patch(
             status,
             updatedAt: new Date(),
           },
-        }
+        },
       );
 
       if (!result.matchedCount) {
@@ -1085,10 +1093,8 @@ app.patch(
         message: "Failed to update service status",
       });
     }
-  }
+  },
 );
-
-
 
 app.get("/users", verifyToken, verifyRole("admin"), async (req, res) => {
   try {
@@ -1107,7 +1113,7 @@ app.get("/users", verifyToken, verifyRole("admin"), async (req, res) => {
             subscriptionPlan: 1,
             subscriptionExpiresAt: 1,
           },
-        }
+        },
       )
       .toArray();
 
